@@ -235,7 +235,7 @@ def set_1fichier_inline(api_key: str, download_url: str):
     file_id = m.group(1)
 
     url = "https://api.1fichier.com/v1/file/chattr.cgi"
-    payload = json.dumps({"url": download_url, "inline": 1}).encode('utf-8')
+    payload = json.dumps({"urls": [download_url], "inline": 1}).encode('utf-8')
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}",
