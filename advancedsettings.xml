@@ -1,0 +1,17 @@
+<advancedsettings version="1.0">
+    <cache>
+        <!-- Buffer all filesystems: local, network (SMB/FTP/NFS), internet streams -->
+        <buffermode>1</buffermode>
+        <!-- 150 MB buffer in RAM: provides huge protection against Wi-Fi drops and bitrate spikes without exhausting RAM -->
+        <memorysize>157286400</memorysize>
+        <!-- Read buffer up to 20x real-time playback speed to fill cache instantly -->
+        <readfactor>20</readfactor>
+    </cache>
+    <video>
+        <busydialogdelayms>750</busydialogdelayms>
+        <hideextensions>.strm</hideextensions>
+    </video>
+    <music>
+        <hideextensions>.strm</hideextensions>
+    </music>
+</advancedsettings>

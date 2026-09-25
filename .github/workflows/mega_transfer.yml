@@ -1,0 +1,38 @@
+name: MEGA to 1fichier Cloud Transfer
+
+on:
+  workflow_dispatch:
+    inputs:
+      mega_links:
+        description: 'Links MEGA (um por linha)'
+        required: true
+        type: string
+      folder_id:
+        description: 'ID da pasta 1fichier (ex: 22726720 para Sailor Moon Crystal)'
+        required: false
+        default: '22726720'
+        type: string
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install cryptography
+
+      - name: Run Cloud Transfer
+        env:
+          FICHIER_API_KEY: ${{ secrets.FICHIER_API_KEY }}
+          FOLDER_ID: ${{ inputs.folder_id }}
+          MEGA_LINKS: ${{ inputs.mega_links }}
+        run: |
+          python3 mega_cloud_transfer.py

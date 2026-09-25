@@ -1,0 +1,16 @@
+# Credentials & sensitive files
+.1fichier_token
+*.token
+*.key
+
+# Caches & metadata
+catalog_cache.json
+metadata_cache.json
+mega_upload_state.json
+__pycache__/
+*.pyc
+
+# Local / temporary
+.DS_Store
+*.log
+scratch/
