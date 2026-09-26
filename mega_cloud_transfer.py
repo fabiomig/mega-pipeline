@@ -35,34 +35,54 @@ except ImportError:
     HAVE_CRYPTODOME = False
 
 
-def is_tor_running() -> bool:
+def get_active_proxy() -> tuple[str, int] | None:
+    # 1. Cloudflare WARP (port 40000) - Velocidade Gigabit
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         s.settimeout(1)
-        res = s.connect_ex(('127.0.0.1', 9050))
+        if s.connect_ex(('127.0.0.1', 40000)) == 0:
+            s.close()
+            return ("warp", 40000)
         s.close()
-        return res == 0
-    except Exception:
-        return False
-
-
-def rotate_tor_ip():
-    print("🔄 A solicitar novo IP ao Tor (renovando circuito)...")
-    try:
-        subprocess.run("service tor restart || killall -HUP tor", shell=True, capture_output=True)
     except Exception:
         pass
+
+    # 2. Tor (port 9050)
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(1)
+        if s.connect_ex(('127.0.0.1', 9050)) == 0:
+            s.close()
+            return ("tor", 9050)
+        s.close()
+    except Exception:
+        pass
+
+    return None
+
+
+def rotate_proxy(proxy_type: str, port: int):
+    print(f"🔄 A renovar IP do {proxy_type.upper()}...")
+    if proxy_type == "warp":
+        subprocess.run("warp-cli --accept-tos disconnect", shell=True, capture_output=True)
+        subprocess.run("warp-cli --accept-tos registration delete", shell=True, capture_output=True)
+        subprocess.run("warp-cli --accept-tos registration new", shell=True, capture_output=True)
+        subprocess.run("warp-cli --accept-tos mode proxy", shell=True, capture_output=True)
+        subprocess.run("warp-cli --accept-tos proxy port 40000", shell=True, capture_output=True)
+        subprocess.run("warp-cli --accept-tos connect", shell=True, capture_output=True)
+    elif proxy_type == "tor":
+        subprocess.run("service tor restart || killall -HUP tor", shell=True, capture_output=True)
     time.sleep(3)
-    # Verificar novo IP
     try:
         p = subprocess.run(
-            ["curl", "-s", "--socks5-hostname", "127.0.0.1:9050", "https://api.ipify.org"],
+            ["curl", "-s", "--socks5-hostname", f"127.0.0.1:{port}", "https://api.ipify.org"],
             capture_output=True, text=True, timeout=10
         )
         if p.returncode == 0 and p.stdout.strip():
-            print(f"🌐 Novo IP atribuído pelo Tor: {p.stdout.strip()}")
+            print(f"🌐 Novo IP ({proxy_type.upper()}): {p.stdout.strip()}")
     except Exception:
         pass
+
 
 
 def b64url(s: str) -> bytes:
@@ -103,7 +123,7 @@ def parse_mega_url(url_or_str: str) -> tuple[str, str]:
     return "", ""
 
 
-def get_mega_info(file_id: str, key_str: str, use_tor: bool = False) -> dict:
+def get_mega_info(file_id: str, key_str: str, proxy_info=None) -> dict:
     raw_key = b64url(key_str)
     aes_key = bytes(raw_key[i] ^ raw_key[i+16] for i in range(16))
     iv_upper = int.from_bytes(raw_key[16:24], byteorder='big')
@@ -111,9 +131,10 @@ def get_mega_info(file_id: str, key_str: str, use_tor: bool = False) -> dict:
     payload = [{'a': 'g', 'g': 1, 'p': file_id, 'ssl': 1}]
     data_json = json.dumps(payload)
 
-    if use_tor and is_tor_running():
+    if proxy_info:
+        ptype, port = proxy_info
         cmd = [
-            "curl", "-s", "--socks5-hostname", "127.0.0.1:9050",
+            "curl", "-s", "--socks5-hostname", f"127.0.0.1:{port}",
             "-H", "Content-Type: application/json",
             "-H", "User-Agent: Mozilla/5.0",
             "-d", data_json,
@@ -165,15 +186,17 @@ def get_mega_info(file_id: str, key_str: str, use_tor: bool = False) -> dict:
     }
 
 
-def download_mega_raw(info: dict, enc_path: str, use_tor: bool = False, max_retries: int = 5) -> bool:
-    """Descarrega o ficheiro cifrado bruto da MEGA via curl (com suporte a Tor e recuperação 509)."""
+def download_mega_raw(info: dict, enc_path: str, proxy_info=None, max_retries: int = 5) -> bool:
+    """Descarrega o ficheiro cifrado bruto da MEGA via curl (com suporte a WARP/Tor e recuperação 509)."""
+    curr_proxy = proxy_info
     for attempt in range(1, max_retries + 1):
         cmd = ["curl", "-L", "-s", "-S", "--fail", "--connect-timeout", "20", "--retry", "2", "-o", enc_path]
-        if use_tor and is_tor_running():
-            cmd.extend(["--socks5-hostname", "127.0.0.1:9050"])
+        if curr_proxy:
+            cmd.extend(["--socks5-hostname", f"127.0.0.1:{curr_proxy[1]}"])
         cmd.append(info['dl_url'])
 
-        print(f"📥 A descarregar da MEGA{' [via Tor]' if use_tor else ''} ({info['size']/(1024*1024):.1f} MB)...")
+        label = f" [via {curr_proxy[0].upper()}]" if curr_proxy else ""
+        print(f"📥 A descarregar da MEGA{label} ({info['size']/(1024*1024):.1f} MB)...")
         start_t = time.time()
         p = subprocess.run(cmd, capture_output=True, text=True)
 
@@ -185,22 +208,25 @@ def download_mega_raw(info: dict, enc_path: str, use_tor: bool = False, max_retr
 
         err_out = p.stderr.lower()
         if "509" in err_out or "bandwidth" in err_out or "limit" in err_out:
-            print(f"⚠️  MEGA Bandwidth Limit (509) detectado na tentativa {attempt}/{max_retries}!")
-            if is_tor_running():
-                rotate_tor_ip()
-                use_tor = True
+            print(f"⚠️  MEGA Bandwidth Limit (509) na tentativa {attempt}/{max_retries}!")
+            if curr_proxy:
+                rotate_proxy(curr_proxy[0], curr_proxy[1])
                 time.sleep(3)
                 continue
             else:
-                print("💡 Tor não está ativo. A ativar rotação ou aguardar...")
+                curr_proxy = get_active_proxy()
+                if curr_proxy:
+                    rotate_proxy(curr_proxy[0], curr_proxy[1])
+                    continue
                 time.sleep(10)
         else:
-            print(f"⚠️  Erro no curl ({p.returncode}): {p.stderr.strip()[:150]}")
-            if is_tor_running():
-                rotate_tor_ip()
-            time.sleep(5)
+            print(f"⚠️  Aviso curl ({p.returncode}): {p.stderr.strip()[:150]}")
+            if curr_proxy:
+                rotate_proxy(curr_proxy[0], curr_proxy[1])
+            time.sleep(4)
 
     return False
+
 
 
 def decrypt_file_ctr(enc_path: str, dec_path: str, aes_key: bytes, iv_upper: int):
@@ -371,12 +397,13 @@ def main():
         print("ℹ️  Nenhum link MEGA fornecido.")
         return
 
-    # Verificar se Tor está disponível para rotação de IP
-    use_tor = is_tor_running()
-    if use_tor:
-        print("🧅 Tor SOCKS5 detetado em 127.0.0.1:9050! Rotação automática de IP ativa.")
+    # Verificar se WARP ou Tor estão disponíveis para rotação de IP
+    proxy_info = get_active_proxy()
+    if proxy_info:
+        ptype, pport = proxy_info
+        print(f"🛡️  Proxy {ptype.upper()} SOCKS5 detetado em 127.0.0.1:{pport}! Rotação automática de IP ativa.")
     else:
-        print("ℹ️  Tor não detetado (a usar ligação direta).")
+        print("ℹ️  Nenhum proxy detetado (a usar ligação direta).")
 
     # Obter ficheiros já existentes na pasta do 1fichier
     print("🔍 A verificar ficheiros já existentes na pasta do 1fichier...")
@@ -399,7 +426,7 @@ def main():
 
         print(f"\n[{idx}/{len(links)}] ==================================================")
         try:
-            info = get_mega_info(file_id, key_str, use_tor=use_tor)
+            info = get_mega_info(file_id, key_str, proxy_info=proxy_info)
 
             # SALVAGUARDA: Se já foi enviado para o 1fichier, não gastar quota da MEGA!
             if info['filename'] in existing:
@@ -410,7 +437,8 @@ def main():
             dec_file = work_dir / info['filename']
 
             # 1. Download bruto da MEGA (com recuperação e rotação de IP se 509)
-            ok = download_mega_raw(info, str(enc_file), use_tor=use_tor)
+            ok = download_mega_raw(info, str(enc_file), proxy_info=proxy_info)
+
             if not ok:
                 print(f"❌ Falha no download da MEGA para {info['filename']}")
                 continue
