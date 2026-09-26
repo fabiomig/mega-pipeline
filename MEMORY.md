@@ -142,7 +142,21 @@ Diferente do Transfer.it (onde os ficheiros já vêm descompactados/sem cifra no
   - `./mega_1fichier_upload.py`: Submete os links pendentes em lotes controlados (predefinição: 5 ficheiros por lote);
   - `./mega_1fichier_upload.py --status`: Apresenta uma tabela em tempo real com o estado de cada tarefa remota;
   - `./mega_1fichier_upload.py --watch`: Monitoriza a conclusão dos downloads, fixa `inline: 1` automaticamente nos ficheiros concluídos e sincroniza o catálogo no `play.hospidy.com`;
-  - `./mega_1fichier_upload.py --resolve-only`: Inspeciona os metadados, tamanhos e URLs de túnel sem submeter à API.
+   - `./mega_1fichier_upload.py --resolve-only`: Inspeciona os metadados, tamanhos e URLs de túnel sem submeter à API.
+
+### D. Túnel Multipart com Password (`mega_multipart_transfer.py`)
+* **Propósito:** Alguns conjuntos MEGA são **arquivos RAR divididos e protegidos por password** (ex: `Tom.And.Jerry.DVD.12.PT.PAL.DVDR-NoGrp.part01.rar` … `.part10.rar`, ~4.32 GB, password `goldtuganime.biz` / `goldtuganime.com`). O objetivo é extrair e enviar **apenas o `.iso`** para o 1fichier.
+* **Formato detetado:** RAR 4.x multipart (magic `Rar!\x1a\x07\x00`), confirmado por leitura dos primeiros bytes desencriptados (AES-CTR) da parte 01 via HTTP Range.
+* **Pipeline:**
+  1. `get_mega_info` em todos os links (só metadados, barato) e agrupamento por nome base.
+     - `classify_part` reconhece `.partNN.rar` (novo) e `.rar/.r00/.r01` (antigo); `build_groups` ordena por índice.
+  2. Download + desencriptação AES-128-CTR de cada parte para `WORK_DIR/<base>/<nome_original>` (o extrator encadeia as partes pelo nome).
+  3. `extract_iso` aponta para a **primeira parte** e tenta `(ferramenta × password)`: `7z` (requer codec `p7zip-rar`), `unar`, `unrar`, `bsdtar`. A ferramenta é o ciclo externo para evitar repetir extrações grandes com password errada.
+  4. `find_images` seleciona `.iso/.img` > 1 MB; as partes RAR são apagadas antes do upload para poupar disco (pico ≈ partes + ISO ≈ 8.6 GB).
+  5. `upload_to_1fichier` + `set_1fichier_inline` apenas da imagem.
+* **Deteção RAR-aware:** `tool_supports_rar` corre `7z i` e procura o codec `rar`; se não houver nenhuma ferramenta RAR-capaz e o processo for root (Colab), instala `p7zip-full p7zip-rar unar unrar-free` automaticamente.
+* **Execução:** pensado para **Google Colab** (clonar o repo, `apt-get install p7zip-rar unar`, definir `FICHIER_API_KEY`/`MEGA_LINKS`/`ARCHIVE_PASSWORDS`/`FOLDER_ID`). Também existe o workflow `mega_multipart.yml` como alternativa. Reutiliza todos os helpers de `mega_cloud_transfer.py`.
+* **Modos:** `--dry-run`/`--resolve-only` inspeciona e agrupa sem descarregar nem precisar de API key.
 
 ---
 

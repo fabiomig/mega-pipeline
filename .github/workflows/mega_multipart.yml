@@ -1,0 +1,46 @@
+name: MEGA Multipart RAR to 1fichier (ISO)
+
+on:
+  workflow_dispatch:
+    inputs:
+      mega_links:
+        description: 'Links MEGA das partes RAR (um por linha)'
+        required: true
+        type: string
+      folder_id:
+        description: 'ID da pasta 1fichier (ex: 22726720)'
+        required: false
+        default: '22726720'
+        type: string
+      passwords:
+        description: 'Passwords do arquivo (separadas por vírgula)'
+        required: false
+        default: 'goldtuganime.biz,goldtuganime.com'
+        type: string
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies (crypto + RAR)
+        run: |
+          pip install cryptography
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full p7zip-rar unar
+
+      - name: Run Multipart Transfer (só ISO)
+        env:
+          FICHIER_API_KEY: ${{ secrets.FICHIER_API_KEY }}
+          FOLDER_ID: ${{ inputs.folder_id }}
+          MEGA_LINKS: ${{ inputs.mega_links }}
+          ARCHIVE_PASSWORDS: ${{ inputs.passwords }}
+        run: |
+          python3 mega_multipart_transfer.py
